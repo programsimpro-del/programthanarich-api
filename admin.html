@@ -306,42 +306,51 @@ function setQuota(orderNo, quota) {
 /* ══════ LOAD / SAVE ══════ */
 const ORDERS_API = "https://programthanarichapi.vercel.app/api/orders";
 
-async function loadAll(){
+function loadAll(){
+  // โหลดจาก localStorage ทันที — แสดงผลไว
   try{pkgs=JSON.parse(localStorage.getItem("pt_packages")||"null")||DEFAULT_PKGS;}catch(_){pkgs=DEFAULT_PKGS;}
-  
-  // ดึงจาก Vercel API ก่อน
-  try{
-    var r = await fetch(ORDERS_API);
-    var data = await r.json();
-    if(data.orders && data.orders.length > 0){
-      reqs = data.orders;
-      // merge กับ localStorage (เพื่อรักษาการแก้ไขของ Admin)
-      var local = JSON.parse(localStorage.getItem("pt_requests")||"[]");
-      local.forEach(function(lo){
-        var idx = reqs.findIndex(function(r){return r.ref===lo.ref;});
-        if(idx>=0){
-          // เก็บ status และ messages จาก Admin ไว้
-          reqs[idx].status = lo.status || reqs[idx].status;
-          reqs[idx].shopeeVerified = lo.shopeeVerified || reqs[idx].shopeeVerified;
-          reqs[idx].lineMessages = lo.lineMessages || reqs[idx].lineMessages;
-          reqs[idx].activatedPackage = lo.activatedPackage || reqs[idx].activatedPackage;
-          reqs[idx].activatedAt = lo.activatedAt || reqs[idx].activatedAt;
-          reqs[idx].aiResult = lo.aiResult || reqs[idx].aiResult;
-        }
-      });
-      localStorage.setItem("pt_requests", JSON.stringify(reqs));
-    } else {
-      try{reqs=JSON.parse(localStorage.getItem("pt_requests")||"null")||[];}catch(_){reqs=[];}
-    }
-  }catch(e){
-    console.warn("API fetch failed, using localStorage", e);
-    try{reqs=JSON.parse(localStorage.getItem("pt_requests")||"null")||[];}catch(_){reqs=[];}
-  }
-
+  try{reqs=JSON.parse(localStorage.getItem("pt_requests")||"null")||[];}catch(_){reqs=[];}
   renderChatList();
   renderOrdList();
   updateBadges();
   $("rts").textContent="อัพเดท "+ts();
+  // sync จาก API เงียบๆ ใน background
+  syncFromAPI();
+}
+
+function syncFromAPI(){
+  fetch(ORDERS_API)
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      if(!data.orders || !data.orders.length) return;
+      // merge: ข้อมูลจาก API + status/messages จาก localStorage
+      var local = JSON.parse(localStorage.getItem("pt_requests")||"[]");
+      var localMap = {};
+      local.forEach(function(o){ localMap[o.ref]=o; });
+      var merged = data.orders.map(function(o){
+        var lo = localMap[o.ref];
+        if(lo){
+          o.status           = lo.status           || o.status;
+          o.shopeeVerified   = lo.shopeeVerified   || o.shopeeVerified;
+          o.lineMessages     = lo.lineMessages      || o.lineMessages;
+          o.activatedPackage = lo.activatedPackage || o.activatedPackage;
+          o.activatedAt      = lo.activatedAt      || o.activatedAt;
+          o.aiResult         = lo.aiResult         || o.aiResult;
+        }
+        return o;
+      });
+      // เพิ่มรายการที่มีใน localStorage แต่ไม่มีใน API
+      local.forEach(function(lo){
+        if(!merged.find(function(o){return o.ref===lo.ref;})) merged.push(lo);
+      });
+      reqs = merged;
+      localStorage.setItem("pt_requests", JSON.stringify(reqs));
+      renderChatList();
+      renderOrdList();
+      updateBadges();
+      $("rts").textContent="อัพเดท "+ts()+" (ซิงค์แล้ว)";
+    })
+    .catch(function(e){ console.warn("sync failed:", e.message); });
 }
 function saveReqs(){try{localStorage.setItem("pt_requests",JSON.stringify(reqs));}catch(_){}}
 
