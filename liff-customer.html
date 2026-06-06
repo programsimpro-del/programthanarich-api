@@ -456,6 +456,16 @@ async function submitForm(){
   var req={ref:refNo,platform:plt,orderNo:orderNo,simPhone:simPhone,pkgId:pkgId,pkgName:pkg?pkg.name:"",pkgCode:pkg?pkg.code:"",imgOrder:photos[0],imgSim:photos[1],imgReg:photos[2],status:"pending",shopeeVerified:"pending",submittedAt:now,lineUserId:lp?lp.userId:null,lineDisplayName:lp?lp.displayName:null,linePictureUrl:lp?lp.pictureUrl:null,lineMessages:[{id:1,from:"customer",text:"สวัสดีค่ะ ขอรับเน็ตฟรีเดือนแรกค่ะ\nเลขพัสดุ "+orderNo+"\nเบอร์ซิม "+simPhone+"\nแพ็คเกจ "+(pkg?pkg.name:""),time:now}]};
   try{var list=JSON.parse(localStorage.getItem("pt_requests")||"[]");list.unshift(req);localStorage.setItem("pt_requests",JSON.stringify(list));}catch(_){}
   recordReq(orderNo,simPhone,refNo);
+
+  // บันทึก order ไปที่ Vercel API (ให้ Admin ดึงมาแสดงได้)
+  try{
+    await fetch("https://programthanarichapi.vercel.app/api/orders",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(req)
+    });
+  }catch(e){console.warn("save order",e);}
+
   await notifyAdmin(refNo,req,pkg);
   await delay(400); log("✅ รับข้อมูลเรียบร้อย ทีมงานจะดำเนินการให้เร็วที่สุด");
   await delay(400);
