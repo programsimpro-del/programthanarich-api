@@ -49,6 +49,16 @@ export default async function handler(req, res) {
       }
     };
 
+    // บันทึก order ไว้ใน orders endpoint
+    try {
+      const ordersUrl = `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers.host}/api/orders`;
+      await fetch(ordersUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(req.body)
+      });
+    } catch(e) { console.warn("save order failed", e); }
+
     const r = await fetch("https://api.line.me/v2/bot/message/push", {
       method: "POST",
       headers: { "Content-Type":"application/json", "Authorization":`Bearer ${LINE_TOKEN}` },
