@@ -1,65 +1,68 @@
-// Webhook รับข้อความจาก LINE OA → เก็บใน Firebase
 export default async function handler(req, res) {
+  // CORS
   res.setHeader("Access-Control-Allow-Origin", "*");
-  if (req.method !== "POST") return res.status(200).end(); // LINE ส่ง GET verify
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Line-Signature");
 
-  const FB_DB   = "https://programthanrich-default-rtdb.asia-southeast1.firebasedatabase.app";
-  const FB_KEY  = process.env.FB_SERVICE_KEY || ""; // ไม่บังคับ (test mode เปิดอยู่)
-  const LINE_TOKEN = process.env.LINE_TOKEN;
+  // LINE ส่ง GET มา verify
+  if (req.method === "GET" || req.method === "OPTIONS") {
+    return res.status(200).json({ status: "ok" });
+  }
+  if (req.method !== "POST") return res.status(200).end();
+
+  const FB  = "https://programthanrich-default-rtdb.asia-southeast1.firebasedatabase.app";
+  const TOK = process.env.LINE_TOKEN;
 
   try {
     const events = req.body?.events || [];
 
     for (const ev of events) {
-      if (ev.type !== "message" || ev.message?.type !== "text") continue;
+      const userId = ev.source?.userId;
+      if (!userId) continue;
 
-      const userId   = ev.source?.userId;
-      const text     = ev.message?.text;
-      const ts       = new Date(ev.timestamp).toLocaleTimeString("th-TH",{hour:"2-digit",minute:"2-digit"});
-      const msgId    = ev.message?.id || Date.now().toString();
-
-      if (!userId || !text) continue;
-
-      // 1. ดึงโปรไฟล์ LINE
-      let displayName = userId;
-      let pictureUrl  = null;
+      // ดึงโปรไฟล์
+      let name = userId, pic = null;
       try {
         const pr = await fetch(`https://api.line.me/v2/bot/profile/${userId}`, {
-          headers: { Authorization: `Bearer ${LINE_TOKEN}` }
+          headers: { Authorization: `Bearer ${TOK}` }
         });
-        if (pr.ok) {
-          const pd = await pr.json();
-          displayName = pd.displayName || userId;
-          pictureUrl  = pd.pictureUrl  || null;
-        }
+        if (pr.ok) { const d = await pr.json(); name = d.displayName; pic = d.pictureUrl; }
       } catch(_) {}
 
-      // 2. บันทึกข้อความใน Firebase /chats/{userId}/messages/{msgId}
-      const msgData = {
-        id: msgId, from: "customer", text, time: ts,
-        timestamp: ev.timestamp
-      };
-      await fetch(`${FB_DB}/chats/${userId}/messages/${msgId}.json`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(msgData)
-      });
+      const ts = new Date(ev.timestamp).toLocaleTimeString("th-TH", {hour:"2-digit",minute:"2-digit"});
+      const msgId = "m" + (ev.message?.id || Date.now());
 
-      // 3. อัพเดทข้อมูล user
-      await fetch(`${FB_DB}/chats/${userId}/info.json`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId, displayName, pictureUrl,
-          lastMessage: text, lastTime: ts,
-          lastTimestamp: ev.timestamp, unread: true
-        })
+      // ข้อความ text
+      if (ev.type === "message" && ev.message?.type === "text") {
+        await fbPut(`${FB}/chats/${userId}/messages/${msgId}.json`, {
+          id: msgId, from: "customer", text: ev.message.text, time: ts, ts: ev.timestamp
+        });
+      }
+      // follow event
+      else if (ev.type === "follow") {
+        await fbPut(`${FB}/chats/${userId}/messages/${msgId}.json`, {
+          id: msgId, from: "customer", text: "เพิ่มเพื่อนแล้ว", time: ts, ts: ev.timestamp
+        });
+      }
+
+      // อัพเดท info
+      const lastText = ev.message?.text || (ev.type === "follow" ? "เพิ่มเพื่อนแล้ว" : ev.type);
+      await fbPatch(`${FB}/chats/${userId}/info.json`, {
+        userId, displayName: name, pictureUrl: pic,
+        lastMsg: lastText, lastTime: ts, lastTs: ev.timestamp, unread: true
       });
     }
 
     return res.status(200).json({ ok: true });
   } catch(e) {
     console.error(e);
-    return res.status(500).json({ error: e.message });
+    return res.status(200).json({ ok: false, error: e.message });
   }
+}
+
+async function fbPut(url, data) {
+  return fetch(url, { method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify(data) });
+}
+async function fbPatch(url, data) {
+  return fetch(url, { method:"PATCH", headers:{"Content-Type":"application/json"}, body:JSON.stringify(data) });
 }
